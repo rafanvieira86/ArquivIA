@@ -7,7 +7,8 @@ const norm=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLo
 function toast(s){const t=$('toast');t.textContent=s;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000)}
 
 function build(){
-  const g=$('formGrid');g.innerHTML='';
+  const g=$('formGrid');if(!g)return;
+  g.innerHTML='';
   fields.forEach(n=>{
     const w=document.createElement('div');w.className='field';
     const l=document.createElement('label');l.textContent=n;
@@ -26,7 +27,6 @@ function build(){
     x.id='f_'+slug(n);x.dataset.field=n;w.append(l,x);g.append(w);
   });
   
-  // AUTOMAÇÃO DO PCTT TRF2
   if(typeof pcttDB !== 'undefined') {
     const inputCodigo = $('f_' + slug('Código (PCTT)'));
     if (inputCodigo) {
@@ -48,9 +48,9 @@ function build(){
 }
 build();
 
-function prog(p,s){$('progressBox').classList.remove('hidden');$('progressBar').style.width=Math.max(0,Math.min(100,p))+'%';$('progressPct').textContent=Math.round(p)+'\%';$('progressText').textContent=s}
-function showRaw(t){$('rawText').textContent=t\vert{}\vert{}'(nenhum texto reconhecido)';$('rawBox').classList.remove('hidden')}
-function setStatus(s,ok=false){$('ocrStatus').textContent=s;$('ocrStatus').className='ocr-status '+(ok?'ok':'')}
+function prog(p,s){const b=$('progressBox');if(b)b.classList.remove('hidden');const pb=$('progressBar');if(pb)pb.style.width=Math.max(0,Math.min(100,p))+'%';const pt=$('progressPct');if(pt)pt.textContent=Math.round(p)+'\%';const ptxt=$('progressText');if(ptxt)ptxt.textContent=s;}
+function showRaw(t){const r=$('rawText');if(r)r.textContent=t\vert{}\vert{}'(nenhum texto reconhecido)';const rb=$('rawBox');if(rb)rb.classList.remove('hidden');}
+function setStatus(s,ok=false){const st=$('ocrStatus');if(st){st.textContent=s;st.className='ocr-status '+(ok?'ok':'');}}
 function prepCanvas(srcCanvas){
  const max=3200, scale=Math.min(1,max/Math.max(srcCanvas.width,srcCanvas.height));
  const x=document.createElement('canvas');x.width=Math.max(1,Math.round(srcCanvas.width*scale));x.height=Math.max(1,Math.round(srcCanvas.height*scale));
@@ -72,13 +72,15 @@ function extract(text){
  
  const aliases={
  'Título':['descrição','descricao','assunto','descrição do documento','descricao do documento','tipo doc.','tipo doc','tipo de documento','espécie documental'],
- 'Datas Limites':['data abrangente','período','periodo','período abrangido','data arq.','data de arquivamento'],
+ 'Datas Limites':['data abrangente','período','periodo','período abrangido','data arq.','data de arquivamento','ano de arquivamento'],
  'Código (PCTT)':['código (pctt)','codigo (pctt)','código pctt','codigo pctt','pctt'],
  'Prazo de Guarda PCTT (Arquivo Corrente) (em anos)':['prazo de guarda pctt (arquivo corrente)','arquivo corrente'],
  'Prazo de Guarda PCTT (Arquivo intermediário) (em anos)':['prazo de guarda pctt (arquivo intermediário)','arquivo intermediário'],
  'Destinação Final':['destinação final','destinacao final'],
  'OBS:':['obs:','obs','observação','observações'],
- 'ENDEREÇO ANTERIOR':['endereço anterior','endereco anterior']
+ 'ENDEREÇO ANTERIOR':['endereço anterior','endereco anterior'],
+ 'Tipo de Caixa':['tipo de caixa'],
+ 'Data de Eliminação':['data de eliminação','data de eliminacao','eliminação','eliminacao']
  };
  
  for(const [k,a] of Object.entries(aliases))v[k]=valueAfterLabel(lines,a);
@@ -95,11 +97,84 @@ function extract(text){
  return v;
 }
 
-async function process(file){if(!file)return;try{if(!window.Tesseract)throw new Error('Tesseract.js não carregou. Abra o aplicativo com internet e recarregue a página.');setStatus('Preparando documento...');prog(2,'Abrindo arquivo...');const canvases=file.type==='application/pdf'?await pdfCanvases(file):await imageCanvas(file);let text='';const worker=await Tesseract.createWorker('por',1,{logger:m=>{if(m.status==='recognizing text')prog(20+(m.progress||0)*75,'Lendo texto da imagem...');else if(m.status==='loading language traineddata')setStatus('Baixando modelo de português (primeira vez pode demorar)...')}});await worker.setParameters({preserve_interword_spaces:'1'});for(let i=0;i<canvases.length;i++){prog(20+(i/canvases.length)*75,`Lendo página ${i+1} de ${canvases.length}...`);const r=await worker.recognize(canvases[i]);text+='\n'+r.data.text;canvases[i].width=canvases[i].height=1}await worker.terminate();text=cleanOcr(text);showRaw(text);if(!text){setStatus('OCR terminou, mas não encontrou texto. Tente uma foto mais nítida, reta e bem iluminada.');toast('Nenhum texto foi reconhecido.');return}const values=extract(text);let count=0;fields.forEach(n=>{if(!drop.has(n)&&n!==formula&&values[n]){$('f_'+slug(n)).value=values[n];count++}});prog(100,'Leitura concluída');setStatus(`OCR concluído: ${count} campo(s) preenchido(s). Confira o texto lido abaixo.` ,true);toast(count?`Documento lido: ${count} campos preenchidos.`:'Texto lido, mas nenhum campo foi localizado.');setTimeout(()=>$('progressBox').classList.add('hidden'),1200)}catch(e){console.error(e);prog(0,'Erro: '+(e.message||e));setStatus('Erro no OCR: '+(e.message||e));toast('Não foi possível ler o documento. Veja a mensagem abaixo.')}}
-$('fileInput').onchange=e=>process(e.target.files[0]);$('cameraInput').onchange=e=>process(e.target.files[0]);
+async function process(file){
+    if(!file)return;
+    try{
+        if(!window.Tesseract)throw new Error('Tesseract.js não carregou. Recarregue a página.');
+        setStatus('Preparando documento...');
+        prog(2,'Abrindo arquivo...');
+        const canvases=file.type==='application/pdf'?await pdfCanvases(file):await imageCanvas(file);
+        let text='';
+        const worker=await Tesseract.createWorker('por',1,{logger:m=>{if(m.status==='recognizing text')prog(20+(m.progress||0)*75,'Lendo texto da imagem...');else if(m.status==='loading language traineddata')setStatus('Baixando modelo de português...')}});
+        await worker.setParameters({preserve_interword_spaces:'1'});
+        for(let i=0;i<canvases.length;i++){
+            prog(20+(i/canvases.length)*75,`Lendo página ${i+1} de ${canvases.length}...`);
+            const r=await worker.recognize(canvases[i]);
+            text+='\n'+r.data.text;
+            canvases[i].width=canvases[i].height=1;
+        }
+        await worker.terminate();
+        text=cleanOcr(text);
+        showRaw(text);
+        if(!text){
+            setStatus('OCR terminou, mas não encontrou texto. Tente uma foto mais nítida.');
+            toast('Nenhum texto foi reconhecido.');
+            return;
+        }
+        const values=extract(text);
+        let count=0;
+        fields.forEach(n=>{
+            if(!drop.has(n)&&n!==formula&&values[n]){
+                const f = $('f_'+slug(n));
+                if(f){ f.value=values[n]; count++; }
+            }
+        });
+        prog(100,'Leitura concluída');
+        setStatus(`OCR concluído: ${count} campo(s) preenchido(s). Confira o texto lido abaixo.` ,true);
+        toast(count?`Documento lido: ${count} campos preenchidos.`:'Texto lido, mas nenhum campo foi localizado.');
+        setTimeout(()=>$('progressBox').classList.add('hidden'),1200);
+    }catch(e){
+        console.error(e);
+        prog(0,'Erro: '+(e.message||e));
+        setStatus('Erro no OCR: '+(e.message||e));
+        toast('Não foi possível ler o documento.');
+    }
+}
+const fIn=$('fileInput'); if(fIn) fIn.onchange=e=>{if(e.target.files[0])process(e.target.files[0])};
+const cIn=$('cameraInput'); if(cIn) cIn.onchange=e=>{if(e.target.files[0])process(e.target.files[0])};
+
 function form(){const r={};fields.forEach(n=>r[n]=$('f_'+slug(n))?.value.trim()||'');return r}
 function render(){const w=$('tableWrap');$('count').textContent=records.length;if(!records.length){w.innerHTML='<div class="empty">Nenhum registro adicionado.</div>';return}w.innerHTML='<table><thead><tr>'+fields.map(n=>'<th>'+esc(n)+'</th>').join('')+'<th>Ações</th></tr></thead><tbody>'+records.map((r,i)=>'<tr>'+fields.map(n=>'<td>'+esc(r[n])+'</td>').join('')+`<td><button class="danger" data-d="${i}">Excluir</button></td></tr>`).join('')+'</tbody></table>';w.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{records.splice(+b.dataset.d,1);render()})}
-$('addBtn').onclick=()=>{const r=form();if(!r['Nome do Produtor']&&!r['Título']&&!r['ENDEREÇO (CAIXA) (atual)']){toast('Preencha pelo menos Nome do Produtor, Título ou Endereço da Caixa.');return}records.push(r);render();fields.forEach(n=>{const x=$('f_'+slug(n));if(x)x.value=''});$('rawBox').classList.add('hidden');toast('Registro adicionado.')};
-$('clearBtn').onclick=()=>{fields.forEach(n=>{const x=$('f_'+slug(n));if(x)x.value=''});toast('Campos limpos.')};
-function date(v){const m=String(v).match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);if(!m)return v;let y=+m[3];if(y<100)y+=2000;return new Date(y,+m[2]-1,+m[1])}$('exportBtn').onclick=()=>{if(!records.length){toast('Adicione pelo menos um registro.');return}const a=[fields];records.forEach((r,i)=>{const row=fields.map(n=>r[n]||'');const d=fields.indexOf('Datas Limites');if(d>=0&&row[d])row[d]=date(row[d]);row[c.formulaColumn-1]=`=IF(OR(D${i+2}="",N${i+2}=""),"",DATE(YEAR(D${i+2})+N${i+2}+1,MONTH(D${i+2}),DAY(D${i+2})))`;a.push(row)});const w=XLSX.utils.book_new(),s=XLSX.utils.aoa_to_sheet(a);s['!cols']=fields.map(n=>({wch:Math.min(42,Math.max(12,String(n).length+2))}));XLSX.utils.book_append_sheet(w,s,'Plan1');XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet([['ENDEREÇO (CAIXA)','UNIDADE']]),'Plan2');XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet([['ENDEREÇO (CAIXA)']]),'Plan3');XLSX.writeFile(w,'Inventario_TRF2_OCR.xlsx');toast('Excel exportado.')};
+const addBtn=$('addBtn');
+if(addBtn) addBtn.onclick=()=>{
+    const r=form();
+    if(!r['Nome do Produtor']&&!r['Título']&&!r['ENDEREÇO (CAIXA) (atual)']){toast('Preencha pelo menos Nome do Produtor, Título ou Endereço da Caixa.');return}
+    records.push(r);render();
+    fields.forEach(n=>{const x=$('f_'+slug(n));if(x)x.value=''});$('rawBox').classList.add('hidden');toast('Registro adicionado.');
+};
+const clearBtn=$('clearBtn');
+if(clearBtn) clearBtn.onclick=()=>{fields.forEach(n=>{const x=$('f_'+slug(n));if(x)x.value=''});toast('Campos limpos.')};
+function date(v){const m=String(v).match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);if(!m)return v;let y=+m[3];if(y<100)y+=2000;return new Date(y,+m[2]-1,+m[1])}
+const expBtn=$('exportBtn');
+if(expBtn) expBtn.onclick=()=>{
+    if(!records.length){toast('Adicione pelo menos um registro.');return}
+    const a=[fields];
+    const d=fields.indexOf('Datas Limites');
+    const prazoIndex=fields.indexOf('Prazo de Guarda PCTT (Arquivo Corrente) (em anos)');
+    const colDate=d>=0 ? String.fromCharCode(65+d) : 'C';
+    const colPrazo=prazoIndex>=0 ? String.fromCharCode(65+prazoIndex) : 'I';
+    
+    records.forEach((r,i)=>{
+        const row=fields.map(n=>r[n]||'');
+        if(d>=0&&row[d])row[d]=date(row[d]);
+        row[c.formulaColumn-1]=`=IF(OR(${colDate}${i+2}="",${colPrazo}${i+2}=""),"",DATE(YEAR(${colDate}${i+2})+${colPrazo}${i+2}+1,MONTH(${colDate}${i+2}),DAY(${colDate}${i+2})))`;
+        a.push(row);
+    });
+    const w=XLSX.utils.book_new(),s=XLSX.utils.aoa_to_sheet(a);
+    s['!cols']=fields.map(n=>({wch:Math.min(42,Math.max(12,String(n).length+2))}));
+    XLSX.utils.book_append_sheet(w,s,'Plan1');
+    XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet([['ENDEREÇO (CAIXA)','UNIDADE']]),'Plan2');
+    XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet([['ENDEREÇO (CAIXA)']]),'Plan3');
+    XLSX.writeFile(w,'Inventario_TRF2_OCR.xlsx');toast('Excel exportado.');
+};
 })();
