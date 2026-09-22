@@ -1,16 +1,12 @@
 window.APP_CONFIG = {
   "headers": [
-    "Origem",
-    "Dossiê ou Item?",
-    "Número sequencial",
-    "DATA ARQ.",
-    "Ano de arquivamento",
-    "Cadastrado em",
-    "TIPO DOC.",
-    "DESCRIÇÃO",
-    "NUMERAÇÃO",
-    "DATA ABRANGENTE",
-    "Órgão Julgador",
+    "Código de Referência", 
+    "Título", 
+    "Datas Limites",
+    "Nível de Descrição", 
+    "Dimensão e Suporte",
+    "Nome do Produtor", 
+    "Condições de Acesso", 
     "Código (PCTT)",
     "Prazo de Guarda PCTT (Arquivo Corrente) (em anos)",
     "Prazo de Guarda PCTT (Arquivo intermediário) (em anos)",
@@ -39,9 +35,15 @@ window.APP_CONFIG = {
     "Caixa atual diz que tem documento?": [
       "Sim",
       "Não"
+    ],
+    "Nível de Descrição": [
+      "Fundo", "Seção", "Série", "Dossiê", "Item Documental"
+    ],
+    "Condições de Acesso": [
+      "Sem restrição", "Restrito (Art. 31 LAI)", "Sigiloso"
     ]
   },
-  "formulaColumn": 16,
+  "formulaColumn": 12,
   "sectors": [
     "Presidência",
     "Vice-Presidência",
