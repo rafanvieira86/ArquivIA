@@ -1,130 +1,61 @@
-const $=s=>document.querySelector(s);
-let currentImage=null, currentPdf=null, worker=null, records=[], pctt=[];
-let headers=[
-"Caixa","Setor","Código PCTT","Assunto/Atividade","Descrição","Data inicial","Data final",
-"Quantidade","Observação","Situação da Revisão","Caixa atual diz que tem documento?"
-];
-
-function status(t,c=""){ $("#status").textContent=t; $("#status").className=c; }
-function escapeHtml(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));}
-
-function makeForm(){
- const el=$("#form"); el.innerHTML="";
- const grid=document.createElement("div"); grid.className="grid";
- headers.forEach(h=>{
-   const lab=document.createElement("label"); lab.className="field"; lab.innerHTML=`${escapeHtml(h)}<small>${APP_CONFIG.dropdowns[h]?"preenchimento manual":"preenchido pelo OCR/PCTT quando possível"}</small>`;
-   let input;
-   if(APP_CONFIG.dropdowns[h]){
-     input=document.createElement("select"); input.innerHTML='<option value="">— selecionar —</option>'+APP_CONFIG.dropdowns[h].map(x=>`<option>${escapeHtml(x)}</option>`).join("");
-   }else if(h==="Observação"){
-     input=document.createElement("textarea");
-   }else{
-     input=document.createElement("input");
-   }
-   input.dataset.field=h; lab.appendChild(input); grid.appendChild(lab);
- });
- el.appendChild(grid);
+(()=>{
+const c=APP_CONFIG, fields=c.headers, drop=new Set(Object.keys(c.dropdowns)), formula=fields[c.formulaColumn-1], records=[];
+const $=id=>document.getElementById(id);
+const slug=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+const esc=v=>String(v??'').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[x]));
+const norm=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+function toast(s){const t=$('toast');t.textContent=s;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000)}
+function build(){const g=$('formGrid');g.innerHTML='';fields.forEach(n=>{const w=document.createElement('div');w.className='field';const l=document.createElement('label');l.textContent=n;let x;if(drop.has(n)){x=document.createElement('select');x.innerHTML='<option value="">Selecionar...</option>'+c.dropdowns[n].map(v=>`<option>${esc(v)}</option>`).join('')}else if(n===formula){w.classList.add('readonly');x=document.createElement('input');x.readOnly=true;x.placeholder='Calculado no Excel'}else if(['DESCRIÇÃO','OBS:','ENDEREÇO ANTERIOR'].includes(n)){x=document.createElement('textarea')}else x=document.createElement('input');x.id='f_'+slug(n);x.dataset.field=n;w.append(l,x);g.append(w)})}build();
+function prog(p,s){$('progressBox').classList.remove('hidden');$('progressBar').style.width=Math.max(0,Math.min(100,p))+'%';$('progressPct').textContent=Math.round(p)+'%';$('progressText').textContent=s}
+function showRaw(t){$('rawText').textContent=t||'(nenhum texto reconhecido)';$('rawBox').classList.remove('hidden')}
+function setStatus(s,ok=false){$('ocrStatus').textContent=s;$('ocrStatus').className='ocr-status '+(ok?'ok':'')}
+function prepCanvas(srcCanvas){
+ const max=3200, scale=Math.min(1,max/Math.max(srcCanvas.width,srcCanvas.height));
+ const x=document.createElement('canvas');x.width=Math.max(1,Math.round(srcCanvas.width*scale));x.height=Math.max(1,Math.round(srcCanvas.height*scale));
+ const ctx=x.getContext('2d',{willReadFrequently:true});ctx.drawImage(srcCanvas,0,0,x.width,x.height);
+ const im=ctx.getImageData(0,0,x.width,x.height),d=im.data;
+ for(let i=0;i<d.length;i+=4){let y=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]);y=(y-128)*1.45+128;y=Math.max(0,Math.min(255,y));d[i]=d[i+1]=d[i+2]=y;}
+ ctx.putImageData(im,0,0);return x;
 }
-makeForm();
-
-$("#imageInput").addEventListener("change",e=>{
- const f=e.target.files[0]; if(!f)return;
- const rd=new FileReader(); rd.onload=()=>{currentImage=rd.result;$("#preview").innerHTML=`<img class="thumb" src="${currentImage}">`;$("#ocrBtn").disabled=false;currentPdf=null;};rd.readAsDataURL(f);
-});
-$("#pdfInput").addEventListener("change",e=>{
- const f=e.target.files[0]; if(!f)return; currentPdf=f; currentImage=null; $("#preview").innerHTML="<p>PDF selecionado. Clique em Ler documento com OCR.</p>"; $("#ocrBtn").disabled=false;
-});
-
-async function imageFromPdf(file){
- const data=await file.arrayBuffer();
- const pdf=await pdfjsLib.getDocument({data}).promise;
- const page=await pdf.getPage(1);
- const vp=page.getViewport({scale:2.2});
- const c=document.createElement("canvas");c.width=vp.width;c.height=vp.height;
- await page.render({canvasContext:c.getContext("2d"),viewport:vp}).promise;
- return c.toDataURL("image/jpeg",.95);
+async function imageCanvas(file){const u=URL.createObjectURL(file);try{const im=await new Promise((r,j)=>{const i=new Image;i.onload=()=>r(i);i.onerror=()=>j(new Error('Não foi possível abrir a imagem.'));i.src=u});const x=document.createElement('canvas');const max=4200,s=Math.min(1,max/Math.max(im.naturalWidth,im.naturalHeight));x.width=Math.round(im.naturalWidth*s);x.height=Math.round(im.naturalHeight*s);x.getContext('2d').drawImage(im,0,0,x.width,x.height);return [prepCanvas(x)];}finally{URL.revokeObjectURL(u)}}
+async function pdfCanvases(file){if(!window.pdfjsLib)throw new Error('PDF.js não carregou. Verifique a internet e recarregue a página.');pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise,a=[];for(let p=1;p<=pdf.numPages;p++){prog(5+(p/pdf.numPages)*15,`Abrindo página ${p} de ${pdf.numPages}...`);const page=await pdf.getPage(p),v=page.getViewport({scale:2.5}),x=document.createElement('canvas');x.width=v.width;x.height=v.height;await page.render({canvasContext:x.getContext('2d'),viewport:v}).promise;a.push(prepCanvas(x))}return a}
+function cleanOcr(t){return String(t||'').replace(/\r/g,'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim()}
+function valueAfterLabel(lines, aliases){const ns=aliases.map(norm);for(let i=0;i<lines.length;i++){const line=norm(lines[i]);for(const a of ns){if(line===a||line.startsWith(a+':')||line.startsWith(a+' -')||line.includes(a+':')){let raw=lines[i].trim();let pos=norm(raw).indexOf(a);if(pos>=0){let val=raw.slice(pos+a.length).replace(/^\s*[:;\-–—]+\s*/,'').trim();if(val&&norm(val)!==a)return val}for(let j=i+1;j<Math.min(lines.length,i+3);j++){if(lines[j].trim())return lines[j].trim()}}}}return ''}
+function regexValue(text,re){const m=text.match(re);return m?m[1].trim():''}
+function sector(t){const n=norm(t);let best='';for(const s of c.sectors){const sn=norm(s);if(n.includes(sn))return s;const words=sn.split(/\s+/).filter(w=>w.length>3);if(words.filter(w=>n.includes(w)).length>=Math.min(3,words.length))best=s}return best}
+function extract(text){
+ const raw=cleanOcr(text), lines=raw.split(/\n/).map(x=>x.trim()).filter(Boolean), v={};
+ v['Origem']=sector(raw);v['UNIDADE']=sector(raw);
+ v['Número sequencial']=regexValue(raw,/(?:n(?:úmero|umero)?\s*sequencial|sequencial)\s*[:#-]?\s*(\d{1,10})/i)||regexValue(raw,/\bSEQ(?:UENCIAL)?\s*[:#-]?\s*(\d{1,10})\b/i);
+ v['DATA ARQ.']=regexValue(raw,/(?:data\s*(?:de\s*)?(?:arq(?:uivamento)?|arquivo)?)\s*[:#-]?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/i);
+ v['Ano de arquivamento']=regexValue(raw,/(?:ano\s*(?:de\s*)?arquivamento)\s*[:#-]?\s*((?:19|20)\d{2})/i)||regexValue(raw,/\b((?:19|20)\d{2})\b/);
+ const aliases={
+ 'TIPO DOC.':['tipo doc.','tipo doc','tipo de documento','espécie documental','especie documental'],
+ 'DESCRIÇÃO':['descrição','descricao','assunto','descrição do documento','descricao do documento'],
+ 'NUMERAÇÃO':['numeração','numeracao','número do documento','numero do documento'],
+ 'DATA ABRANGENTE':['data abrangente','período','periodo','período abrangido','periodo abrangido'],
+ 'Órgão Julgador':['órgão julgador','orgao julgador'],
+ 'Código (PCTT)':['código (pctt)','codigo (pctt)','código pctt','codigo pctt','pctt'],
+ 'Prazo de Guarda PCTT (Arquivo Corrente) (em anos)':['prazo de guarda pctt (arquivo corrente)','arquivo corrente'],
+ 'Prazo de Guarda PCTT (Arquivo intermediário) (em anos)':['prazo de guarda pctt (arquivo intermediário)','arquivo intermediário','arquivo intermediario'],
+ 'Destinação Final':['destinação final','destinacao final'],
+ 'CÓDIGO DE CLASSIFICAÇÃO ADICIONAL':['código de classificação adicional','codigo de classificacao adicional','classificação adicional','classificacao adicional'],
+ 'OBS:':['obs:','obs','observação','observacao','observações','observacoes'],
+ 'ENDEREÇO ANTERIOR':['endereço anterior','endereco anterior'],
+ 'Tipo de Caixa':['tipo de caixa'],
+ 'Data de Eliminação':['data de eliminação','data de eliminacao','eliminação','eliminacao'],
+ 'ONDE PAREI':['onde parei']};
+ for(const [k,a] of Object.entries(aliases))v[k]=valueAfterLabel(lines,a);
+ v['ENDEREÇO (CAIXA) (anterior)']=regexValue(raw,/(?:endereço\s*\(?\s*caixa\s*\)?|caixa|cx\.?)[\s:#-]*(E\s*[\/-]\s*[0-9A-Z-]+)/i)||regexValue(raw,/\b(E\s*[\/-]\s*\d{1,8})\b/i);
+ v['ENDEREÇO (CAIXA) (atual)']=v['ENDEREÇO (CAIXA) (anterior)'];
+ return v;
 }
-function preprocess(data){
- return new Promise(resolve=>{
-  const im=new Image(); im.onload=()=>{
-   const scale=Math.min(2.2,2400/Math.max(im.width,im.height));
-   const c=document.createElement("canvas");c.width=Math.round(im.width*scale);c.height=Math.round(im.height*scale);
-   const x=c.getContext("2d");x.drawImage(im,0,0,c.width,c.height);
-   const d=x.getImageData(0,0,c.width,c.height), a=d.data;
-   for(let i=0;i<a.length;i+=4){let g=.299*a[i]+.587*a[i+1]+.114*a[i+2];g=g<150?g*.78:g*1.12;a[i]=a[i+1]=a[i+2]=Math.max(0,Math.min(255,g));}
-   x.putImageData(d,0,0);resolve(c.toDataURL("image/png"));
-  }; im.src=data;
- });
-}
-$("#ocrBtn").onclick=async()=>{
- try{
-  $("#ocrBtn").disabled=true;$("#bar").style.width="5%";status("Preparando imagem...");
-  let img=currentImage||await imageFromPdf(currentPdf); img=await preprocess(img);
-  if(!worker) worker=await Tesseract.createWorker("por",1,{logger:m=>{if(m.progress)$("#bar").style.width=Math.round(m.progress*100)+"%";}});
-  status("Lendo documento...");
-  const r=await worker.recognize(img); $("#ocrText").value=r.data.text||"";
-  $("#bar").style.width="100%";status("OCR concluído. Revise o texto e clique em Classificar pelo PCTT.","ok");
-  fillFromText(r.data.text||"");
- }catch(e){console.error(e);status("Erro no OCR: "+e.message,"err");}finally{$("#ocrBtn").disabled=false;}
-};
-
-function normalize(s){return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();}
-function tokens(s){return normalize(s).split(/\s+/).filter(x=>x.length>2);}
-function score(text,row){
- const tt=new Set(tokens(text)), rr=tokens([row.Codificacao,row.Codigo,row.Assunto,row.Classe,row.Subclasse,row.Atividade].join(" "));
- let hit=0; for(const x of rr) if(tt.has(x)) hit++;
- return rr.length?hit/Math.sqrt(rr.length):0;
-}
-function classify(){
- const text=$("#ocrText").value.trim(); if(!text){status("Nenhum texto para classificar.","warn");return;}
- if(!pctt.length){$("#matches").innerHTML="<p class='warn'>Nenhum PCTT foi carregado. Use o botão 'Carregar PCTT'.</p>";return;}
- const arr=pctt.map(r=>({...r,_score:score(text,r)})).sort((a,b)=>b._score-a._score).slice(0,8);
- $("#matches").innerHTML=arr.map((r,i)=>`<div class="match" onclick='selectPCTT(${i})'><strong>${escapeHtml(r.Codificacao||r.Codigo||"")} — ${escapeHtml(r.Assunto||r.Atividade||"")}</strong><span class="badge">correspondência ${Math.round(r._score*100)}%</span><div>${escapeHtml(r.Atividade||"")}</div></div>`).join("");
- window._matches=arr;
-}
-window.selectPCTT=i=>{
- const r=window._matches[i]; $("#pcttDetails").innerHTML=`<b>Código:</b> ${escapeHtml(r.Codificacao||r.Codigo)}<br><b>Assunto:</b> ${escapeHtml(r.Assunto)}<br><b>Classe:</b> ${escapeHtml(r.Classe)}<br><b>Subclasse:</b> ${escapeHtml(r.Subclasse)}<br><b>Atividade:</b> ${escapeHtml(r.Atividade)}<br><b>Corrente:</b> ${escapeHtml(r["Arquivo Corrente"]||"")}<br><b>Intermediário:</b> ${escapeHtml(r["Arquivo Intermediário"]||"")}<br><b>Destinação:</b> ${escapeHtml(r["Destinação Final"]||"")}`;
- set("Código PCTT",r.Codificacao||r.Codigo||"");set("Assunto/Atividade",r.Atividade||r.Assunto||"");
-};
-function set(h,v){const e=document.querySelector(`[data-field="${CSS.escape(h)}"]`);if(e&&!e.value)e.value=v;}
-function fillFromText(t){
- const lines=t.split(/\n+/).map(x=>x.trim()).filter(Boolean);
- const all=t.replace(/\s+/g," ");
- const num=all.match(/\b(?:caixa|cx)[\s:.-]*(\d{1,6})\b/i); if(num)set("Caixa",num[1]);
- const dates=[...all.matchAll(/\b(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})\b/g)].map(m=>m[1]);
- if(dates[0])set("Data inicial",dates[0]); if(dates[1])set("Data final",dates[1]);
- const q=all.match(/\b(?:qtd|quantidade|quant)[\s:.-]*(\d+)\b/i);if(q)set("Quantidade",q[1]);
- let best=APP_CONFIG.sectors.find(s=>normalize(all).includes(normalize(s)));
- if(best)set("Setor",best);
-}
-$("#classifyBtn").onclick=classify;
-
-function addRecord(){
- const o={}; document.querySelectorAll("[data-field]").forEach(e=>o[e.dataset.field]=e.value);
- if(!o["Situação da Revisão"])o["Situação da Revisão"]="Dúvida";
- records.push(o);renderRecords();
-}
-$("#addBtn").onclick=addRecord;
-function renderRecords(){
- $("#records").innerHTML=records.length?records.map((r,i)=>`<div class="record"><b>#${i+1}</b> — Caixa: ${escapeHtml(r.Caixa)} — ${escapeHtml(r["Código PCTT"])} — ${escapeHtml(r["Assunto/Atividade"])}<br><small>${escapeHtml(r.Descrição)}</small> <button onclick="removeRecord(${i})">Excluir</button></div>`).join(""):"<p class='muted'>Nenhum registro.</p>";
-}
-window.removeRecord=i=>{records.splice(i,1);renderRecords()};
-
-$("#exportBtn").onclick=()=>{
- if(!records.length){status("Adicione pelo menos um registro.","warn");return;}
- const rows=records.map(r=>{const o={};headers.forEach(h=>o[h]=r[h]||"");return o});
- const ws=XLSX.utils.json_to_sheet(rows,{header:headers});
- const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Inventário");
- XLSX.writeFile(wb,"Inventario_TRF2_PCTT_OCR.xlsx");
-};
-const pcttInput=document.createElement("input");pcttInput.type="file";pcttInput.accept=".xlsx,.xls,.csv";pcttInput.style.display="none";document.body.appendChild(pcttInput);
-const pcttBtn=document.createElement("button");pcttBtn.textContent="📚 Carregar PCTT (Excel)";document.querySelector("#matches").before(pcttBtn);
-pcttBtn.onclick=()=>pcttInput.click();
-pcttInput.onchange=async e=>{
- const f=e.target.files[0];if(!f)return;
- const ab=await f.arrayBuffer();const wb=XLSX.read(ab,{type:"array"});
- const sh=wb.Sheets[wb.SheetNames.find(n=>/PCTT JF/i.test(n))||wb.SheetNames[0]];
- pctt=XLSX.utils.sheet_to_json(sh,{defval:""});
- status(`PCTT carregado: ${pctt.length} registros.`,"ok");
-};
-renderRecords();
+async function process(file){if(!file)return;try{if(!window.Tesseract)throw new Error('Tesseract.js não carregou. Abra o aplicativo com internet e recarregue a página.');setStatus('Preparando documento...');prog(2,'Abrindo arquivo...');const canvases=file.type==='application/pdf'?await pdfCanvases(file):await imageCanvas(file);let text='';const worker=await Tesseract.createWorker('por',1,{logger:m=>{if(m.status==='recognizing text')prog(20+(m.progress||0)*75,'Lendo texto da imagem...');else if(m.status==='loading language traineddata')setStatus('Baixando modelo de português (primeira vez pode demorar)...')}});await worker.setParameters({preserve_interword_spaces:'1'});for(let i=0;i<canvases.length;i++){prog(20+(i/canvases.length)*75,`Lendo página ${i+1} de ${canvases.length}...`);const r=await worker.recognize(canvases[i]);text+='\n'+r.data.text;canvases[i].width=canvases[i].height=1}await worker.terminate();text=cleanOcr(text);showRaw(text);if(!text){setStatus('OCR terminou, mas não encontrou texto. Tente uma foto mais nítida, reta e bem iluminada.');toast('Nenhum texto foi reconhecido.');return}const values=extract(text);let count=0;fields.forEach(n=>{if(!drop.has(n)&&n!==formula&&values[n]){$('f_'+slug(n)).value=values[n];count++}});prog(100,'Leitura concluída');setStatus(`OCR concluído: ${count} campo(s) preenchido(s). Confira o texto lido abaixo.` ,true);toast(count?`Documento lido: ${count} campos preenchidos.`:'Texto lido, mas nenhum campo foi localizado.');setTimeout(()=>$('progressBox').classList.add('hidden'),1200)}catch(e){console.error(e);prog(0,'Erro: '+(e.message||e));setStatus('Erro no OCR: '+(e.message||e));toast('Não foi possível ler o documento. Veja a mensagem abaixo.')}}
+$('fileInput').onchange=e=>process(e.target.files[0]);$('cameraInput').onchange=e=>process(e.target.files[0]);
+function form(){const r={};fields.forEach(n=>r[n]=$('f_'+slug(n))?.value.trim()||'');return r}
+function render(){const w=$('tableWrap');$('count').textContent=records.length;if(!records.length){w.innerHTML='<div class="empty">Nenhum registro adicionado.</div>';return}w.innerHTML='<table><thead><tr>'+fields.map(n=>'<th>'+esc(n)+'</th>').join('')+'<th>Ações</th></tr></thead><tbody>'+records.map((r,i)=>'<tr>'+fields.map(n=>'<td>'+esc(r[n])+'</td>').join('')+`<td><button class="danger" data-d="${i}">Excluir</button></td></tr>`).join('')+'</tbody></table>';w.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{records.splice(+b.dataset.d,1);render()})}
+$('addBtn').onclick=()=>{const r=form();if(!r.Origem&&!r['DESCRIÇÃO']&&!r['ENDEREÇO (CAIXA) (atual)']){toast('Preencha pelo menos Origem, Descrição ou Endereço da Caixa.');return}records.push(r);render();fields.forEach(n=>{const x=$('f_'+slug(n));if(x)x.value=''});$('rawBox').classList.add('hidden');toast('Registro adicionado.')};
+$('clearBtn').onclick=()=>{fields.forEach(n=>{const x=$('f_'+slug(n));if(x)x.value=''});toast('Campos limpos.')};
+function date(v){const m=String(v).match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);if(!m)return v;let y=+m[3];if(y<100)y+=2000;return new Date(y,+m[2]-1,+m[1])}
+$('exportBtn').onclick=()=>{if(!records.length){toast('Adicione pelo menos um registro.');return}const a=[fields];records.forEach((r,i)=>{const row=fields.map(n=>r[n]||'');const d=fields.indexOf('DATA ARQ.');if(d>=0&&row[d])row[d]=date(row[d]);row[c.formulaColumn-1]=`=IF(OR(D${i+2}="",N${i+2}=""),"",DATE(YEAR(D${i+2})+N${i+2}+1,MONTH(D${i+2}),DAY(D${i+2})))`;a.push(row)});const w=XLSX.utils.book_new(),s=XLSX.utils.aoa_to_sheet(a);s['!cols']=fields.map(n=>({wch:Math.min(42,Math.max(12,String(n).length+2))}));XLSX.utils.book_append_sheet(w,s,'Plan1');XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet([['ENDEREÇO (CAIXA)','UNIDADE']]),'Plan2');XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet([['ENDEREÇO (CAIXA)']]),'Plan3');XLSX.writeFile(w,'Inventario_TRF2_OCR.xlsx');toast('Excel exportado.')};
+})();

@@ -1,65 +1,29 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TRF2 — Inventário + PCTT + OCR</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#18212b"><title>TRF2 — Inventário por OCR</title>
 <link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
-<header>
-  <h1>TRF2 — Inventário de Caixas</h1>
-  <p>OCR + PCTT 2026 + preenchimento da planilha</p>
-</header>
-
+<header><div><h1>TRF2 — Inventário de Caixas</h1><p>Leitura de documento por OCR • Rua Acre, 80</p></div><span class="badge">Imagem não é salva</span></header>
 <main>
-<section class="card">
-  <h2>1. Documento</h2>
-  <div class="row">
-    <label class="filebox">
-      <span>📷 Fotografar / escolher imagem</span>
-      <input id="imageInput" type="file" accept="image/*" capture="environment">
-    </label>
-    <label class="filebox">
-      <span>📄 Escolher PDF</span>
-      <input id="pdfInput" type="file" accept="application/pdf">
-    </label>
-  </div>
-  <div id="preview"></div>
-  <button id="ocrBtn" disabled>🔎 Ler documento com OCR</button>
-  <div class="progress"><div id="bar"></div></div>
-  <div id="status"></div>
+<section class="card"><h2>1. Documento</h2><p class="hint">Escolha uma foto/PDF ou use a câmera. O OCR roda no navegador.</p>
+<div class="upload-grid">
+<label class="upload"><input id="fileInput" type="file" accept="image/*,application/pdf"><span>📄 Escolher foto/PDF</span></label>
+<label class="upload camera"><input id="cameraInput" type="file" accept="image/*" capture="environment"><span>📷 Fotografar documento</span></label>
+</div>
+<div id="progressBox" class="progress hidden"><div class="progress-head"><span id="progressText">Preparando...</span><span id="progressPct">0%</span></div><div class="bar"><i id="progressBar"></i></div></div>
+<div id="ocrStatus" class="ocr-status"></div>
+<details id="rawBox" class="raw-box hidden"><summary>Texto lido pelo OCR (conferência)</summary><pre id="rawText"></pre></details>
 </section>
-
-<section class="card">
-  <h2>2. Resultado do OCR</h2>
-  <textarea id="ocrText" rows="10" placeholder="O texto reconhecido aparecerá aqui. Você pode corrigir antes de classificar."></textarea>
-  <button id="classifyBtn">🧠 Classificar pelo PCTT</button>
-</section>
-
-<section class="card">
-  <h2>3. Classificação PCTT</h2>
-  <div id="matches"></div>
-  <div id="pcttDetails" class="details"></div>
-</section>
-
-<section class="card">
-  <h2>4. Dados da caixa</h2>
-  <div id="form"></div>
-  <button id="addBtn">➕ Adicionar registro</button>
-  <button id="exportBtn">📊 Exportar Excel</button>
-</section>
-
-<section class="card">
-  <h2>5. Registros</h2>
-  <div id="records"></div>
-</section>
-</main>
-
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs" type="module"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="config.js"></script>
-<script src="script.js"></script>
-</body>
-</html>
+<section class="card"><div class="section-head"><div><h2>2. Campos identificados</h2><p class="hint">Os campos com lista suspensa continuam para escolha manual.</p></div><button id="clearBtn" class="secondary">Limpar</button></div>
+<div id="formGrid" class="form-grid"></div><div class="actions"><button id="addBtn" class="primary">➕ Adicionar registro</button></div></section>
+<section class="card"><div class="section-head"><div><h2>3. Registros</h2><p class="hint"><strong id="count">0</strong> registro(s) aguardando exportação.</p></div><button id="exportBtn" class="primary">⬇️ Exportar Excel</button></div>
+<div id="tableWrap" class="table-wrap"><div class="empty">Nenhum registro adicionado.</div></div></section>
+<section class="card"><h2>Como funciona</h2><ol class="steps"><li>Fotografe ou selecione o documento.</li><li>A imagem é ampliada e preparada para melhorar o OCR.</li><li>O Tesseract lê o português e mostra o texto reconhecido.</li><li>O sistema tenta localizar os valores pelos nomes dos campos.</li><li>Revise, escolha as listas suspensas e adicione o registro.</li><li>Exporte o Excel.</li></ol><p class="privacy">🔒 A foto/PDF não é incluída no Excel e não é enviada para um servidor próprio. Tesseract.js, PDF.js e SheetJS são carregados por CDN.</p></section>
+</main><div id="toast" class="toast"></div><script src="config.js"></script><script src="script.js"></script>
+</body></html>
