@@ -72,6 +72,7 @@ window.onload = function() {
       g.appendChild(w);
     });
     
+    // Automação PCTT
     if (typeof pcttDB !== 'undefined') {
       var inputCodigo = $('f_' + slug('Código (PCTT)'));
       if (inputCodigo) {
@@ -217,24 +218,33 @@ window.onload = function() {
     return best;
   }
 
+  // --- O "SUPER EXTRATOR" ATUALIZADO ---
   function extract(text) {
     var raw = cleanOcr(text);
     var lines = raw.split(/\n/).map(function(x){ return x.trim(); }).filter(Boolean);
     var v = {};
-    v['Nome do Produtor'] = sector(raw);
-    v['UNIDADE'] = sector(raw);
     
+    // 1. Acha o Órgão/Produtor (Ex: TRF2, Corregedoria)
+    v['Nome do Produtor'] = sector(raw);
+    v['UNIDADE'] = v['Nome do Produtor'];
+    
+    // 2. Fallbacks de Regex (Muito fortes, vieram do seu código original)
+    var seqRegex = regexValue(raw, /(?:n(?:úmero|umero)?\s*sequencial|sequencial)\s*[:#-]?\s*(\d{1,10})/i) || regexValue(raw, /\bSEQ(?:UENCIAL)?\s*[:#-]?\s*(\d{1,10})\b/i) || regexValue(raw, /(?:numeração|numeracao)\s*[:#-]?\s*(\d{1,20})/i);
+    var dataRegex = regexValue(raw, /(?:data\s*(?:de\s*)?(?:arq(?:uivamento)?|arquivo)?)\s*[:#-]?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/i) || regexValue(raw, /(?:ano\s*(?:de\s*)?arquivamento)\s*[:#-]?\s*((?:19|20)\d{2})/i);
+    var caixaRegex = regexValue(raw, /(?:endereço\s*\(?\s*caixa\s*\)?|caixa|cx\.?)[\s:#-]*(E\s*[\/-]\s*[0-9A-Z-]+)/i) || regexValue(raw, /\b(E\s*[\/-]\s*\d{1,8})\b/i);
+
+    // 3. Mapeamento de Palavras-chave dos Documentos para campos NOBRADE
     var aliases = {
-      'Título': ['descrição', 'descricao', 'assunto', 'descrição do documento', 'descricao do documento', 'tipo doc.', 'tipo doc', 'tipo de documento', 'espécie documental'],
-      'Datas Limites': ['data abrangente', 'período', 'periodo', 'período abrangido', 'data arq.', 'data de arquivamento', 'ano de arquivamento'],
-      'Código (PCTT)': ['código (pctt)', 'codigo (pctt)', 'código pctt', 'codigo pctt', 'pctt'],
-      'Prazo de Guarda PCTT (Arquivo Corrente) (em anos)': ['prazo de guarda pctt (arquivo corrente)', 'arquivo corrente'],
-      'Prazo de Guarda PCTT (Arquivo intermediário) (em anos)': ['prazo de guarda pctt (arquivo intermediário)', 'arquivo intermediário'],
+      'Código de Referência': ['código de referência', 'codigo de referencia', 'número sequencial', 'numero sequencial', 'numeração', 'numeracao', 'nº', 'processo'],
+      'Título': ['descrição', 'descricao', 'assunto', 'descrição do documento', 'descricao do documento', 'tipo doc.', 'tipo doc', 'tipo de documento', 'espécie documental', 'documento'],
+      'Datas Limites': ['data abrangente', 'período', 'periodo', 'período abrangido', 'data arq.', 'data de arquivamento', 'ano de arquivamento', 'data', 'ano'],
+      'Código (PCTT)': ['código (pctt)', 'codigo (pctt)', 'código pctt', 'codigo pctt', 'pctt', 'código'],
+      'Prazo de Guarda PCTT (Arquivo Corrente) (em anos)': ['prazo de guarda pctt (arquivo corrente)', 'arquivo corrente', 'corrente'],
+      'Prazo de Guarda PCTT (Arquivo intermediário) (em anos)': ['prazo de guarda pctt (arquivo intermediário)', 'arquivo intermediário', 'intermediário', 'intermediario'],
       'Destinação Final': ['destinação final', 'destinacao final'],
       'OBS:': ['obs:', 'obs', 'observação', 'observações'],
       'ENDEREÇO ANTERIOR': ['endereço anterior', 'endereco anterior'],
-      'Tipo de Caixa': ['tipo de caixa'],
-      'Data de Eliminação': ['data de eliminação', 'data de eliminacao', 'eliminação', 'eliminacao']
+      'Tipo de Caixa': ['tipo de caixa']
     };
     
     var keys = Object.keys(aliases);
@@ -243,9 +253,14 @@ window.onload = function() {
       v[k] = valueAfterLabel(lines, aliases[k]);
     }
     
-    v['ENDEREÇO (CAIXA) (anterior)'] = regexValue(raw, /(?:endereço\s*\(?\s*caixa\s*\)?|caixa|cx\.?)[\s:#-]*(E\s*[\/-]\s*[0-9A-Z-]+)/i) || regexValue(raw, /\b(E\s*[\/-]\s*\d{1,8})\b/i);
-    v['ENDEREÇO (CAIXA) (atual)'] = v['ENDEREÇO (CAIXA) (anterior)'];
+    // 4. Garante que os números e endereços vão para o lugar certo
+    if (!v['Código de Referência']) v['Código de Referência'] = seqRegex;
+    if (!v['Datas Limites']) v['Datas Limites'] = dataRegex;
     
+    v['ENDEREÇO (CAIXA) (anterior)'] = caixaRegex;
+    v['ENDEREÇO (CAIXA) (atual)'] = caixaRegex;
+    
+    // Dispara a busca automática da Tabela PCTT
     setTimeout(function() {
       var inputCodigo = $('f_' + slug('Código (PCTT)'));
       if (inputCodigo && inputCodigo.value) {
@@ -289,7 +304,7 @@ window.onload = function() {
       showRaw(text);
       
       if (!text) {
-          setStatus('OCR terminou, mas não encontrou texto claro.');
+          setStatus('OCR terminou, mas não encontrou texto claro na imagem.');
           toast('Nenhum texto reconhecido.');
           return;
       }
@@ -305,7 +320,7 @@ window.onload = function() {
       
       prog(100, 'Leitura concluída');
       setStatus('OCR concluído: ' + count + ' campo(s) preenchido(s). Confira os dados abaixo.', true);
-      toast(count ? 'Leitura concluída.' : 'Nenhum campo compatível foi localizado.');
+      toast(count ? 'Leitura concluída.' : 'O OCR leu a imagem, mas não encontrou os rótulos (veja o botão "Texto Lido").');
       setTimeout(function() { $('progressBox').classList.add('hidden'); }, 1500);
     } catch(e) {
         console.error(e);
@@ -371,8 +386,8 @@ window.onload = function() {
   if (addBtn) {
     addBtn.onclick = function() {
       var r = form();
-      if (!r['Nome do Produtor'] && !r['Título'] && !r['ENDEREÇO (CAIXA) (atual)']) {
-        toast('Preencha pelo menos Nome do Produtor, Título ou Endereço da Caixa.');
+      if (!r['Nome do Produtor'] && !r['Título'] && !r['ENDEREÇO (CAIXA) (atual)'] && !r['Código de Referência']) {
+        toast('Preencha pelo menos Nome do Produtor, Título, Endereço ou Código de Refer.');
         return;
       }
       records.push(r);
